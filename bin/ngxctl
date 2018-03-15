@@ -1,0 +1,119 @@
+#!/bin/bash
+
+# Bold
+BBlack='\e[1;30m'       # Black
+BRed='\e[1;31m'         # Red
+BGreen='\e[1;32m'       # Green
+BYellow='\e[1;33m'      # Yellow
+BBlue='\e[1;34m'        # Blue
+BPurple='\e[1;35m'      # Purple
+BCyan='\e[1;36m'        # Cyan
+BWhite='\e[1;37m'       # White
+
+# Reset
+Color_Off='\e[0m'       # Text Reset
+
+NGINX_HOME=/usr/local/opt/openresty/nginx
+
+if [ -f ${NGINX_HOME}/conf/nginx.conf ]; then
+    NGINX_DEFAULT_CONF_DIR="${NGINX_HOME}/conf"
+else
+    default_conf=$(${NGINX_HOME}/sbin/nginx -V 2>&1 | grep -Eo 'conf-path=[^ ]+' | sed 's/conf-path=//')
+    if [ -z "$default_conf" ]; then
+        echo "No nginx conf directory found, exit"
+        exit 1
+    else
+        # absolute path
+        if echo "$default_conf" | grep '^/' >/dev/null 2>&1 ; then
+            NGINX_DEFAULT_CONF_DIR=$(dirname $default_conf)
+        else
+            NGINX_DEFAULT_CONF_DIR=$(dirname ${NGINX_HOME}/${default_conf})
+        fi
+        if [ ! -f ${NGINX_DEFAULT_CONF_DIR}/nginx.conf ]; then
+            echo "No nginx conf directory found, exit"
+            exit 1
+        else
+            NGINX_DEFAULT_CONF_DIR=$(cd ${NGINX_DEFAULT_CONF_DIR}; pwd)
+        fi
+    fi
+fi
+
+
+# path cannot contain blank characters, or " should be used
+NGINX_PREFIX="$(cd $(dirname $0)/..; pwd)"
+echo "NGINX_PREFIX: ${NGINX_PREFIX}"
+echo "NGINX_DEFAULT_CONF_DIR: ${NGINX_DEFAULT_CONF_DIR}"
+
+NGINXCTL="${NGINX_HOME}/sbin/nginx -p ${NGINX_PREFIX} -c .running_conf/nginx.conf"
+
+usage() {
+    echo "Usage: ${NGINX_PREFIX}/bin/nginxctl {start|stop|reload|restart|configtest}"
+}
+
+merge_conf() {
+    mkdir -p ${NGINX_PREFIX}/.running_conf
+
+    echo "copying ${NGINX_DEFAULT_CONF_DIR} to ${NGINX_PREFIX}/.running_conf ..."
+    rsync -a --delete --copy-unsafe-links ${NGINX_DEFAULT_CONF_DIR}/ "${NGINX_PREFIX}/.running_conf"
+
+    echo "merging ${NGINX_PREFIX}/conf/  to ${NGINX_PREFIX}/.running_conf ..."
+    rsync -a "${NGINX_PREFIX}/conf/" "${NGINX_PREFIX}/.running_conf"
+}
+
+nginx_is_running() {
+    local nginx_pid=nil
+    if [ -f "${NGINX_PREFIX}/run/nginx.pid" ]; then
+        nginx_pid=$(cat "${NGINX_PREFIX}/run/nginx.pid")
+    fi
+
+    if [ "$nginx_pid" = nil ]; then
+        return 1
+    fi
+
+    # The last command's exit value is this function's reture value.
+    kill -0 $nginx_pid > /dev/null 2>&1
+}
+
+case "$1" in
+    start)
+        if nginx_is_running; then
+            echo "Nginx is running, please stop first!"
+        else
+            merge_conf
+            $NGINXCTL
+            #health_check || $NGINXCTL -s stop
+        fi
+    ;;
+    stop)
+        if nginx_is_running; then
+            $NGINXCTL -s stop
+        else
+            echo "Nginx is not running!"
+        fi
+    ;;
+    reload)
+        merge_conf
+        $NGINXCTL -s reload
+    ;;
+    restart)
+        $NGINXCTL -s stop
+        merge_conf
+        $NGINXCTL
+        health_check || $NGINXCTL -s stop
+    ;;
+    configtest)
+        merge_conf
+        $NGINXCTL -t
+    ;;
+    status)
+        if nginx_is_running; then
+            echo "Nginx is running."
+        else
+            echo "Nginx is stopped."
+        fi
+    ;;
+    *)
+        usage
+        exit 1
+    ;;
+esac

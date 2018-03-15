@@ -1,10 +1,8 @@
 # lor
-client_body_temp
-fastcgi_temp
-logs
-proxy_temp
-tmp
-uwsgi_temp
+logs/*
+tmp/*
+run/*
+.running_conf
 
 # Compiled Lua sources
 luac.out
